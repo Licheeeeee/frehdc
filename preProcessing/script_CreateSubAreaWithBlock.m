@@ -1,45 +1,61 @@
 %% Create the subgrid areas and volumes for the SubFREHD-C, ZhiLi20170709
-% Added the automatic block-checking method by ZhiLi 20171027
-
+%  ###Version1: Added the automatic block-checking method by ZhiLi 20171027
+%  ###Version2: The small pixels in block-checking function are removed by
+%  ZhiLi20180213. 
+%  ###Version3: Added an effective sidewall drag model by ZhiLi 20180327
+%  ###Version4: Added an effective bottom drag model by ZhiLi 20180409
+%  ###Version7: Compute slope rather than curvature for bottom friction
+%  correction. Version5 and 6 are abandoned. ZhiLi 20180422
+%  ###Version8: Added the Manning's coefficient by Casas2010. ZhiLi20180506
+%  ###Version9: Enabled subgrid variables only for part of the domain.
+%  ZhiLi20180621
 %% Settings
 % coarse and fine grid size, assume dx=dy
-Dx = 10;
+Dx = 20;
 dx = 1;
 r = Dx / dx;
 % fine grid area
 dA = dx^2;
 % range of possible water elevations
-surfmin = 0.7;
-surfmax = 1.3;
-dsurf = 0.005;
+surfmin = -0.2;
+surfmax = 0.8;
+dsurf = 0.01;
 % mode for computing cell face areas, can be exact or min
 faceMode = 'exact';
-checkBlock = 0;
+checkBlock = 1;
 % whether or not use the Yh bottom drag model
-useYh = 1;
-YhReduction = 0;
-dmax = 10;
-% whether or not plot the face blocking for a specific face
-plotBlock = 0;
-plotSurf = 0.5;
-crange = [-0.5 2.5];
+useYh = 0;
+% whether or not use effective sidewall drag Cd correction
+useEffCd = 1;
+% whether or not use Casas model for Manning's n
+useCn = 0;
+n0 = 0.03;
 % input fine bathymetry file name
-fnameIn = 'bath_1x1_StairV3.mat';
-% output file name
-fnameA = 'subArea_1x1to10x10StairV3.mat';
-fnameB = 'subBath_1x1to10x10StairV3.mat';
-
-%% Load files
+% fnameIn = 'nuecesUpChannelBay_1x1.mat';
+fnameIn = '../../nueces2007_frehdc1x1_finalV4_20180624.mat';
 load(fnameIn);
 % dimension for the fine and coarse bathymetry
 dim = size(bathCenter);
 Dim = dim / r;
+% whether or not use subgrid method only for part of the domain
+usePartialSub = 1;
+pdomain = [1 245 1 330];
+fnameCoarse = 'NDHMV4_Bath_Edges_and_Channel_Final_dH0p2_filterSize_40x40_gridSize_20x20.mat';
+% whether or not plot the face blocking for a specific face
+plotBlock = 0;
+plotSurf = 0.5;
+crange = [-0.5 2.5];
+% output file name
+fnameA = 'subArea_NDHM20x20V4FEC.mat';
+fnameB = 'subBath_NDHM20x20V4FEC.mat';
+
+%% Load files
+if usePartialSub == 1
+    bathCoar = load(fnameCoarse);
+end
 % vector of all possible water elevations
 surf = surfmin:dsurf:surfmax;
 N = length(surf);
-% curvature
-CvX = zeros(dim);
-CvY = zeros(dim);
 
 %% Create all required subgrid fields
 subA.surf = surf';
@@ -47,23 +63,18 @@ subA.dx = dx;
 subA.Dx = Dx;
 subA.V = zeros([Dim N]);
 subA.Z = zeros([Dim N]);
-subA.N = zeros([Dim N]);
-subA.O = zeros([Dim N]);
 subA.Vxp = zeros([Dim N]);
 subA.Vyp = zeros([Dim N]);
 subA.Vxm = zeros([Dim N]);
 subA.Vym = zeros([Dim N]);
-subA.Zxp = zeros([Dim N]);
-subA.Zyp = zeros([Dim N]);
-subA.Zxm = zeros([Dim N]);
-subA.Zym = zeros([Dim N]);
 subA.Np = zeros([Dim N]);
 subA.Op = zeros([Dim N]);
 subA.Nm = zeros([Dim N]);
 subA.Om = zeros([Dim N]);
 subA.CvX = zeros([Dim N]);
 subA.CvY = zeros([Dim N]);
-subA.Yh = zeros([Dim N]);
+subA.effCdX = zeros([Dim N]);
+subA.effCdY = zeros([Dim N]);
 subB.bottom = zeros(Dim);
 subB.bottomXP = zeros(Dim);
 subB.bottomYP = zeros(Dim);
@@ -71,6 +82,12 @@ subB.wdOp = zeros(Dim);
 subB.wdOm = zeros(Dim);
 subB.wdNp = zeros(Dim);
 subB.wdNm = zeros(Dim);
+if useYh == 1
+    subA.Yh = zeros([Dim N]);
+end
+if useCn == 1
+    subA.Cn = zeros([Dim N]);
+end
 
 %% Compute the subgrid bathymetry
 for ii = 1:Dim(1)
@@ -137,6 +154,16 @@ end
 
 %% Check for face blockings
 if checkBlock == 1 && r > 1
+    % compute effective side drag term, ZhiLi 20180327
+    if useEffCd == 1
+        [cd] = ComputeDragCorrection(bathCenter, surf, r);
+        [cv] = ComputeBottomSlope(bathCenter, surf, r);
+        subA.effCdX = cd.effCdX;
+        subA.effCdY = cd.effCdY;
+        subA.CvX = cv.CvX;
+        subA.CvY = cv.CvY;
+        clear cd cv
+    end
     [block] = CheckFaceBlocking(bathCenter, surf, Dx/dx);
 end
 
@@ -145,29 +172,6 @@ for kk = 1:N
     h = surf(kk);
     fprintf('Computing subgrid variables for elevation = %f...\n',h);
     depth = max(h - bathCenter, 0);
-    % compute the curvature only for the wet regions
-    if r > 1
-        CvXfine = zeros(dim);
-        CvYfine = zeros(dim);
-        depthCntr = depth(2:end-1,2:end-1);
-        depthXp = depth(3:end,2:end-1);
-        depthXm = depth(1:end-2,2:end-1);
-        depthYp = depth(2:end-1,3:end);
-        depthYm = depth(2:end-1,1:end-2);
-        isdry = (depthCntr <= 0);   depthCntr(isdry) = NaN;
-        isdry = (depthXp <= 0);   depthXp(isdry) = NaN;
-        isdry = (depthXm <= 0);   depthXm(isdry) = NaN;
-        isdry = (depthYp <= 0);   depthYp(isdry) = NaN;
-        isdry = (depthYm <= 0);   depthYm(isdry) = NaN;
-
-        CvXfine(2:end-1,2:end-1) = ...
-            abs((depthXp - 2*depthCntr + depthXm) / (2*dx));
-        CvYfine(2:end-1,2:end-1) = ...
-            abs((depthYp - 2*depthCntr + depthYm) / (2*dx));
-        aa = isnan(CvXfine);   CvXfine(aa) = 0;
-        aa = isnan(CvYfine);   CvYfine(aa) = 0;
-    end
-    
     % compute the cell face area
     if r > 1
         [subA] = ComputeSubgridFaceArea(subA, depth, dim, dx, r, kk);
@@ -181,19 +185,6 @@ for kk = 1:N
             j1 = (jj-1)*r+1;
             j2 = jj*r;
             localDepth = depth(i1:i2,j1:j2);
-            % compute coarse grid curvatures
-            if r > 1
-                r2 = round(r/2);
-                if ii ~= Dim(1)
-                    localCvX = CvXfine(i1+r2:i2+r2,j1:j2);
-                    subA.CvX(ii,jj,kk) = sum(localCvX(:));
-                end
-                if jj ~= Dim(2)
-                    localCvY = CvYfine(i1:i2,j1+r2:j2+r2);
-                    subA.CvY(ii,jj,kk) = sum(localCvY(:));
-                end
-            end
-            
             % adjust at boundaries
             if i2 == dim(1)
                 localDepthx = depth(i1+round(r/2):i2, j1:j2);
@@ -209,50 +200,32 @@ for kk = 1:N
             subA.V(ii,jj,kk) = dA .* sum(localDepth(:));
             % compute cell center free surface area
             subA.Z(ii,jj,kk) = dA .* sum(sum(localDepth > 0));
-            % compute cell center areas
-            subA.N(ii,jj,kk) = dx .* min(sum(localDepth, 2));
-            subA.O(ii,jj,kk) = dx .* min(sum(localDepth, 1));
-%             subA.N(ii,jj,kk) = dx .* sum(localDepth(r/2,:));
-%             subA.O(ii,jj,kk) = dx .* sum(localDepth(:,r/2));
             if r > 1
                 % compute cell face volumes
                 subA.Vxp(ii,jj,kk) = dA .* sum(sum(localDepth(round(r/2)+1:r,:)));
                 subA.Vyp(ii,jj,kk) = dA .* sum(sum(localDepth(:,round(r/2)+1:r)));
                 subA.Vxm(ii,jj,kk) = dA .* sum(sum(localDepth(1:round(r/2),:)));
                 subA.Vym(ii,jj,kk) = dA .* sum(sum(localDepth(:,1:round(r/2))));
-                % compute cell face free surface area
-                subA.Zxp(ii,jj,kk) = dA .* sum(sum(localDepth(round(r/2)+1:r,:) > 0));
-                subA.Zyp(ii,jj,kk) = dA .* sum(sum(localDepth(:,round(r/2)+1:r) > 0));
-                subA.Zxm(ii,jj,kk) = dA .* sum(sum(localDepth(1:round(r/2),:) > 0));
-                subA.Zym(ii,jj,kk) = dA .* sum(sum(localDepth(:,1:round(r/2)) > 0));
-%                 % check for blocked cell faces
+                % check for blocked cell faces
                 if checkBlock == 1 && r > 1
                     % remove face blockings
                     if block.Np(ii,jj,kk) == 1
-                        if subA.Np(ii,jj,kk) == 0
-%                                 block.Np(ii,jj,kk) = 0;
-                        else
+                        if subA.Np(ii,jj,kk) ~= 0
                             subA.Np(ii,jj,kk) = 0;
                         end
                     end
                     if block.Nm(ii,jj,kk) == 1
-                        if subA.Nm(ii,jj,kk) == 0
-%                                 block.Nm(ii,jj,kk) = 0;
-                        else
+                        if subA.Nm(ii,jj,kk) ~= 0
                             subA.Nm(ii,jj,kk) = 0;
                         end
                     end
                     if block.Op(ii,jj,kk) == 1
-                        if subA.Op(ii,jj,kk) == 0
-%                                 block.Op(ii,jj,kk) = 0;
-                        else
+                        if subA.Op(ii,jj,kk) ~= 0
                             subA.Op(ii,jj,kk) = 0;
                         end
                     end
                     if block.Om(ii,jj,kk) == 1
-                        if subA.Om(ii,jj,kk) == 0
-%                                 block.Om(ii,jj,kk) = 0;
-                        else
+                        if subA.Om(ii,jj,kk) ~= 0
                             subA.Om(ii,jj,kk) = 0;
                         end
                     end
@@ -263,11 +236,6 @@ for kk = 1:N
                 subA.Vyp(ii,jj,kk) = dA .* localDepth ./ 2;
                 subA.Vxm(ii,jj,kk) = dA .* localDepth ./ 2;
                 subA.Vym(ii,jj,kk) = dA .* localDepth ./ 2;
-                % compute cell face free surface area
-                subA.Zxp(ii,jj,kk) = dA .* (localDepth > 0) ./ 2;
-                subA.Zyp(ii,jj,kk) = dA .* (localDepth > 0) ./ 2;
-                subA.Zxm(ii,jj,kk) = dA .* (localDepth > 0) ./ 2;
-                subA.Zym(ii,jj,kk) = dA .* (localDepth > 0) ./ 2;
                 % compute cell face areas
                 subA.Np(ii,jj,kk) = dx .* localDepth;
                 subA.Op(ii,jj,kk) = dx .* localDepth;
@@ -284,25 +252,85 @@ for kk = 1:N
                 else
                     subA.Yh(ii,jj,kk) = 0;
                 end
-%                 aa = (localDepth > 0);
-%                 M = sum(aa(:));
-%                 local3 = localDepth(aa).^(1/3);
-%                 if M > 0
-%                     subA.Yh(ii,jj,kk) = nansum(1 ./ local3) ./ M;
-%                 end
-                
-                
+            end
+            % compute Cn for Casas2010 model
+            if useCn == 1
+                D = max(0, mean(mean(bathCenter(i1:i2,j1:j2) - subB.bottom(ii,jj))));
+                H = max(0, surf(kk) - subB.bottom(ii,jj));
+                if D > 0
+                    xi = H / D;
+                else
+                    xi = 100;
+                end
+                % check if xi is within the range
+                if xi >= 0.2 && xi <= 7
+                    fxi = 1 + (1/xi)*log(cosh(1-xi)/cosh(1));
+                    subA.Cn(ii,jj,kk) = H^(1/6) / sqrt(9.81*4.5*fxi);
+                else
+                    subA.Cn(ii,jj,kk) = n0;
+                end
             end
         end
     end
     
-    % reduce bottom drag due to insufficient grid resolutions in channels
-    if YhReduction == 1
-        [subA.Yh] = SubgridDragReduction(subA.Yh, subA.V, dmax, kk);
-    end
-    
 end
 
+
+%% Remove subgrid variable out of the partial domain, ZhiLi20180621
+if usePartialSub == 1
+    for kk = 1:N
+        h = surf(kk);
+        fprintf('Disabling subgrid variables for h = %f...\n',h);
+        for ii = 1:Dim(1)
+            for jj = 1:Dim(2)
+                if ii < pdomain(1) || ii > pdomain(2) ||...
+                        jj < pdomain(3) || jj > pdomain(4)
+                    b = bathCoar.bathCenter(ii,jj);
+                    depth = max(h - b, 0);
+                    subA.V(ii,jj,kk) = depth * Dx * Dx;
+                    subA.Z(ii,jj,kk) = Dx * Dx;
+                    subA.Vxp(ii,jj,kk) = 0.5 * subA.V(ii,jj,kk);
+                    subA.Vyp(ii,jj,kk) = 0.5 * subA.V(ii,jj,kk);
+                    subA.Vxm(ii,jj,kk) = 0.5 * subA.V(ii,jj,kk);
+                    subA.Vym(ii,jj,kk) = 0.5 * subA.V(ii,jj,kk);
+                    subA.Np(ii,jj,kk) = depth * Dx;
+                    subA.Nm(ii,jj,kk) = depth * Dx;
+                    subA.Op(ii,jj,kk) = depth * Dx;
+                    subA.Om(ii,jj,kk) = depth * Dx;
+                    subA.effCdX(ii,jj,kk) = 0;
+                    subA.effCdY(ii,jj,kk) = 0;
+                    subA.CvX(ii,jj,kk) = 0;
+                    subA.CvY(ii,jj,kk) = 0;
+                    if kk == 1
+                        subB.bottom(ii,jj) = b;
+                        if ii < Dim(1)
+                            subB.bottomXP(ii,jj) = max(b, bathCoar.bathCenter(ii+1,jj));
+                        else
+                            subB.bottomXP(ii,jj) = b;
+                        end
+                        subB.wdNp(ii,jj) = subB.bottomXP(ii,jj);
+                        if ii > 1
+                            subB.wdNm(ii,jj) = subB.bottomXP(ii-1,jj);
+                        else
+                            subB.wdNm(ii,jj) = subB.bottomXP(ii,jj);
+                        end
+                        if jj < Dim(2)
+                            subB.bottomYP(ii,jj) = max(b, bathCoar.bathCenter(ii,jj+1));
+                        else
+                            subB.bottomYP(ii,jj) = b;
+                        end
+                        subB.wdOp(ii,jj) = subB.bottomYP(ii,jj);
+                        if jj > 1
+                            subB.wdOm(ii,jj) = subB.bottomYP(ii,jj-1);
+                        else
+                            subB.wdOm(ii,jj) = subB.bottomYP(ii,jj);
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
 
 %% Save output
 
