@@ -39,7 +39,7 @@ void ReadUserSettings(Config **setting)
   strcpy((*setting)->inputFolder, "input/");
   (*setting)->useCellEdge = 0;
   (*setting)->savesurface = 1;
-  (*setting)->saveuu = 1;
+  (*setting)->saveuu = 0;
   (*setting)->savevv = 1;
   (*setting)->savedepth = 1;
   (*setting)->savescalar = 1;
