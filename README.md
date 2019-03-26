@@ -2,7 +2,7 @@
 
 FrehdC (Fine Resolution Environmental Hydrodynamic Model in C) is a 2D depth-integrated semi-implicit finite-volume numerical model that simulates free surface flow and scalar transport in shallow estuaries, river deltas and coastal marshes. The original Frehd model was written by Dr. Ben Hodges from the University of Texas at Austin. This 2D C-version Frehd is created by Zhi Li to improve its computation efficiency (by enabling parallel computing with MPI). The solution algorithm follows the study by Casulli (see references below). The linear system is solved with the laspack package by Tomas Skalicky (http://www.mgnet.org/mgnet/Codes/laspack/html/laspack.html).
 
-The current available version of FrehdC (v3.3) is still at testing stage. The comments and documentations may not be user-friendly. For any questions regarding the model please ask Zhi Li at zhili@utexas.edu.
+The current available version of FrehdC (v4.2) is still at testing stage. The comments and documentations may not be user-friendly. For any questions regarding the model please ask Zhi Li at zhili@utexas.edu.
 
 
 # references:
