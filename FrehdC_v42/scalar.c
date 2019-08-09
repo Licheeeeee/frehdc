@@ -29,12 +29,6 @@ void scalarSubStepping(Data **data, Bath *bath, BC *bc, Maps *map, Config *setti
 // ==================== Scalar top level script ====================
 void scalarTransport(Data **data, Maps *map, Bath *bath, BC *bc, Sub *sub, Config *setting, int tt, int irank, int nrank)
 {
-  /*int ii = 21, jj = ii + 1, kk = map->icjM[ii];
-  if (irank == 1)
-  {
-    printf("scalar = %lf,%lf,%lf\n",(*data)->S[ii],(*data)->S[jj],(*data)->S[kk]);
-    printf("scalarmass = %lf,%lf,%lf\n",(*data)->Sm[ii],(*data)->Sm[jj],(*data)->Sm[kk]);
-  }*/
   if (setting->useSubStep == 1)
   {
       scalarSubStepping(data, bath, bc, map, setting, tt, irank, nrank);
@@ -60,8 +54,6 @@ void scalarTransport(Data **data, Maps *map, Bath *bath, BC *bc, Sub *sub, Confi
     mpiexchange((*data)->S, map, setting, irank, nrank);
     mpiexchange((*data)->Sm, map, setting, irank, nrank);
   }
-  int ii = 624, jj = ii+60, kk = jj+60, pp = ii+1, qq = jj+1;
-  //printf("scalar = %lf,%lf,%lf\n",(*data)->S[ii],(*data)->S[jj],(*data)->S[pp]);
 }
 
 // =============== compute mass of scalar in each cell ===============
